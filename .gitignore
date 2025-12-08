@@ -1,0 +1,98 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# AI Models
+ai-models/models/
+ai-models/venv/
+*.pkl
+*.h5
+*.onnx
+*.pt
+*.pth
+*.joblib
+
+# Local Data
+local-data/
+*.log
+*.sqlite
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Kubernetes
+*.kubeconfig
+kubeconfig
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform.tfvars
+
+# AWS
+.aws/
+*.pem
+*.key
+
+# Docker
+docker-compose.override.yml
+
+# Environment
+.env
+.env.local
+*.env
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Streamlit
+.streamlit/
+
+# UI venv
+ai-operator/ui/venv/
+
+# Generated files
+*.pyc
+__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (if any)
+secrets/
+*.secret
+*.key
+
+# Local config overrides
+config/local-override.yaml
