@@ -1,0 +1,82 @@
+# AWS development environment configuration
+# Used when ENV=aws-dev or APP_PROFILE=aws-dev
+
+environment: aws-dev
+
+# Database (RDS)
+database:
+  type: postgresql
+  host: ${RDS_ENDPOINT}  # From Terraform output
+  port: 5432
+  name: finance
+  user: ${DB_USERNAME}
+  password: ${DB_PASSWORD}  # From AWS Secrets Manager
+  ssl_mode: require
+
+# Redis (ElastiCache)
+redis:
+  host: ${REDIS_ENDPOINT}  # From Terraform output
+  port: 6379
+  db: 0
+  ssl: true
+
+# Kafka (MSK)
+kafka:
+  brokers: ${KAFKA_BROKERS}  # From Terraform output
+  topics:
+    logs: ai-devops-logs
+    metrics: ai-devops-metrics
+    events: ai-devops-events
+  sasl:
+    mechanism: SCRAM-SHA-512
+    username: ${KAFKA_USERNAME}
+    password: ${KAFKA_PASSWORD}
+
+# S3
+storage:
+  type: s3
+  bucket: ${S3_BUCKET}  # From Terraform output
+  region: ${AWS_REGION}
+  use_ssl: true
+
+# Paths (S3 prefixes)
+paths:
+  logs: s3://${S3_BUCKET}/logs/
+  metrics: s3://${S3_BUCKET}/metrics/
+  events: s3://${S3_BUCKET}/events/
+  models: s3://${S3_BUCKET}/models/
+
+# Kubernetes (EKS)
+kubernetes:
+  context: ${EKS_CLUSTER_NAME}
+  namespace: default
+
+# Observability
+observability:
+  prometheus:
+    url: http://prometheus.monitoring.svc.cluster.local:9090
+  grafana:
+    url: http://grafana.monitoring.svc.cluster.local:80
+  loki:
+    url: http://loki.logging.svc.cluster.local:3100
+  cloudwatch:
+    log_group: /aws/eks/${EKS_CLUSTER_NAME}/logs
+
+# AI Models
+ai_models:
+  anomaly_detection:
+    model_path: s3://${S3_BUCKET}/models/
+    algorithms: [z_score, isolation_forest, prophet, lstm]
+  rca_engine:
+    dependency_graph_path: s3://${S3_BUCKET}/config/services.json
+  auto_fix:
+    sandbox_namespace: auto-fix-sandbox
+    dry_run: false  # Can enable in AWS with proper safeguards
+
+# Feature flags
+features:
+  use_real_brokers: true
+  mock_trading: false
+  chaos_testing: true
+  auto_fix_enabled: false  # Enable only after thorough testing
+

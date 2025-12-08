@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: emr-api
+  namespace: healthcare
+  labels:
+    app: emr-api
+    cluster: healthcare
+    workload: emr
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: emr-api
+  template:
+    metadata:
+      labels:
+        app: emr-api
+        cluster: healthcare
+        workload: emr
+    spec:
+      containers:
+      - name: emr-api
+        image: emr-api:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: healthcare-db-secret
+              key: url
+        - name: HL7_ENDPOINT
+          value: "http://hl7-processor:8080"
+        - name: FHIR_ENABLED
+          value: "true"
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 1Gi
+          limits:
+            cpu: 4000m
+            memory: 4Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emr-api
+  namespace: healthcare
+  labels:
+    app: emr-api
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: emr-api
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: emr-batch-processor
+  namespace: healthcare
+spec:
+  schedule: "0 */6 * * *"  # Every 6 hours
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: batch-processor
+            image: emr-batch:latest
+            env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: healthcare-db-secret
+                  key: url
+            resources:
+              requests:
+                cpu: 2000m
+                memory: 4Gi
+              limits:
+                cpu: 4000m
+                memory: 8Gi
+          restartPolicy: OnFailure
+

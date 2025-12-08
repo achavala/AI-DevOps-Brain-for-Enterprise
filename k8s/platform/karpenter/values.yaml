@@ -1,0 +1,32 @@
+# Karpenter Helm Chart Values
+# https://github.com/aws/karpenter
+
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/KarpenterControllerRole
+
+settings:
+  clusterName: CLUSTER_NAME
+  defaultInstanceProfile: KarpenterNodeInstanceProfile
+  interruptionQueue: CLUSTER_NAME
+  # Enable webhook for pod disruption budgets
+  featureGates:
+    drift: true
+
+replicas: 1
+
+resources:
+  limits:
+    cpu: 1
+    memory: 1Gi
+  requests:
+    cpu: 1
+    memory: 1Gi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+

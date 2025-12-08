@@ -1,0 +1,79 @@
+{
+  "dashboard": {
+    "title": "Industry Dashboard - {{INDUSTRY}}",
+    "tags": ["industry", "{{INDUSTRY}}"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Pod Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(kube_pod_info{namespace=\"{{INDUSTRY}}\"})",
+            "legendFormat": "Total Pods"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "CPU Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"{{INDUSTRY}}\"}[5m]))",
+            "legendFormat": "CPU Usage"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(container_memory_working_set_bytes{namespace=\"{{INDUSTRY}}\"})",
+            "legendFormat": "Memory Usage"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Pod Restarts",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"{{INDUSTRY}}\"}[5m]))",
+            "legendFormat": "Restarts"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{namespace=\"{{INDUSTRY}}\"}[5m]))",
+            "legendFormat": "Requests/sec"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{namespace=\"{{INDUSTRY}}\",status=~\"5..\"}[5m]))",
+            "legendFormat": "Errors/sec"
+          }
+        ]
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}
+

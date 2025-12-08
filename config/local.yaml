@@ -1,0 +1,86 @@
+# Local environment configuration
+# Used when ENV=local or APP_PROFILE=local
+
+environment: local
+
+# Database
+database:
+  type: postgresql
+  host: host.docker.internal  # For pods, use host.docker.internal
+  port: 5433  # Using 5433 because 5432 is in use by another container
+  name: finance
+  user: postgres
+  password: finance123
+  # For local Python scripts, use localhost
+  local_host: localhost
+  local_port: 5433  # Update if using alternative port
+
+# Redis
+redis:
+  host: host.docker.internal
+  port: 6379
+  # For local Python scripts
+  local_host: localhost
+  db: 0
+
+# Kafka
+kafka:
+  brokers: host.docker.internal:9092
+  # For local Python scripts
+  local_brokers: localhost:9092
+  topics:
+    logs: ai-devops-logs
+    metrics: ai-devops-metrics
+    events: ai-devops-events
+
+# MinIO (S3-compatible)
+storage:
+  type: s3
+  endpoint: http://host.docker.internal:9000
+  access_key: minioadmin
+  secret_key: minioadmin
+  bucket: ai-devops-brain
+  use_ssl: false
+  # For local Python scripts
+  local_endpoint: http://localhost:9000
+
+# Local filesystem paths
+paths:
+  base: ./local-data
+  logs: ./local-data/logs
+  metrics: ./local-data/metrics
+  events: ./local-data/events
+  models: ./ai-models/models
+
+# Kubernetes
+kubernetes:
+  context: minikube  # or kind-ai-devops-brain
+  namespace: default
+
+# Observability
+observability:
+  prometheus:
+    url: http://prometheus.monitoring.svc.cluster.local:9090
+  grafana:
+    url: http://grafana.monitoring.svc.cluster.local:80
+  loki:
+    url: http://loki.logging.svc.cluster.local:3100
+
+# AI Models
+ai_models:
+  anomaly_detection:
+    model_path: ./ai-models/models
+    algorithms: [z_score, isolation_forest, prophet, lstm]
+  rca_engine:
+    dependency_graph_path: ./ai-models/data/services.json
+  auto_fix:
+    sandbox_namespace: auto-fix-sandbox
+    dry_run: true  # Always dry-run in local
+
+# Feature flags
+features:
+  use_real_brokers: false  # Set to true to use real Alpaca/IB
+  mock_trading: true
+  chaos_testing: true
+  auto_fix_enabled: false  # Disable auto-fix in local for safety
+
