@@ -1,0 +1,85 @@
+{
+  "dashboard": {
+    "title": "AI DevOps Brain - Overview",
+    "tags": ["overview", "all-industries"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Total Pods Across All Industries",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(count(kube_pod_info)) by (namespace)",
+            "legendFormat": "{{namespace}}"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Total CPU Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(container_cpu_usage_seconds_total[5m])) by (namespace)",
+            "legendFormat": "{{namespace}}"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Total Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "sum(container_memory_working_set_bytes) by (namespace)",
+            "legendFormat": "{{namespace}}"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Pod Restarts by Industry",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "sum(increase(kube_pod_container_status_restarts_total[5m])) by (namespace)",
+            "legendFormat": "{{namespace}}"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Error Rate by Industry",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (namespace)",
+            "legendFormat": "{{namespace}}"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Request Rate by Industry",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[5m])) by (namespace)",
+            "legendFormat": "{{namespace}}"
+          }
+        ]
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}
+

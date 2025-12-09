@@ -1,0 +1,74 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: all-industries-metrics
+  namespace: monitoring
+  labels:
+    app: prometheus
+spec:
+  selector:
+    matchLabels:
+      prometheus.io/scrape: "true"
+  namespaceSelector:
+    matchNames:
+      - finance
+      - healthcare
+      - automotive
+      - retail
+      - logistics
+      - energy
+      - telecom
+      - banking
+      - insurance
+      - manufacturing
+      - gov
+      - education
+      - cloud
+      - media
+      - aiplatform
+      - semiconductor
+      - aicloud
+      - gpucloud
+      - socialmedia
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: all-industries-pods
+  namespace: monitoring
+  labels:
+    app: prometheus
+spec:
+  selector:
+    matchLabels:
+      prometheus.io/scrape: "true"
+  namespaceSelector:
+    matchNames:
+      - finance
+      - healthcare
+      - automotive
+      - retail
+      - logistics
+      - energy
+      - telecom
+      - banking
+      - insurance
+      - manufacturing
+      - gov
+      - education
+      - cloud
+      - media
+      - aiplatform
+      - semiconductor
+      - aicloud
+      - gpucloud
+      - socialmedia
+  podMetricsEndpoints:
+  - interval: 30s
+    path: /metrics
+
