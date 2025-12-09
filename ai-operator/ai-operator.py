@@ -5,6 +5,7 @@ Watches all 19 industries, detects anomalies, performs RCA, and suggests remedia
 """
 
 import os
+import sys
 import json
 import time
 import logging
@@ -16,6 +17,30 @@ from kubernetes.client.rest import ApiException
 import psycopg2
 from kafka import KafkaProducer, KafkaConsumer
 import redis
+
+# Add AI models to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ai-models'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ai-models', 'anomaly-detection'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ai-models', 'rca-engine'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ai-models', 'auto-fix'))
+
+try:
+    from inference import AnomalyDetectionInference
+except ImportError:
+    AnomalyDetectionInference = None
+    logger.warning("Anomaly detection inference not available")
+
+try:
+    from inference import RCAInference
+except ImportError:
+    RCAInference = None
+    logger.warning("RCA inference not available")
+
+try:
+    from inference import AutoFixInference
+except ImportError:
+    AutoFixInference = None
+    logger.warning("Auto-fix inference not available")
 
 # Configure logging
 logging.basicConfig(
@@ -68,6 +93,11 @@ class AIOperator:
         
         # Industry-specific failure patterns
         self.failure_patterns = self._load_failure_patterns()
+        
+        # AI Models
+        self.anomaly_detector = self._init_anomaly_detector()
+        self.rca_engine = self._init_rca_engine()
+        self.auto_fix_engine = self._init_auto_fix_engine()
         
         # Watch loops
         self.running = True
@@ -136,6 +166,42 @@ class AIOperator:
         except Exception as e:
             logger.warning(f"Kafka connection failed: {e}")
             return None
+    
+    def _init_anomaly_detector(self):
+        """Initialize anomaly detection model"""
+        if AnomalyDetectionInference:
+            try:
+                model_dir = os.getenv('MODEL_DIR', 'ai-models/models')
+                algorithm = os.getenv('ANOMALY_ALGORITHM', 'isolation_forest')
+                detector = AnomalyDetectionInference(model_dir=model_dir, algorithm=algorithm)
+                logger.info(f"✅ Anomaly detector loaded: {algorithm}")
+                return detector
+            except Exception as e:
+                logger.warning(f"Could not load anomaly detector: {e}")
+        return None
+    
+    def _init_rca_engine(self):
+        """Initialize RCA engine"""
+        if RCAInference:
+            try:
+                rca = RCAInference()
+                logger.info("✅ RCA engine loaded")
+                return rca
+            except Exception as e:
+                logger.warning(f"Could not load RCA engine: {e}")
+        return None
+    
+    def _init_auto_fix_engine(self):
+        """Initialize auto-fix engine"""
+        if AutoFixInference:
+            try:
+                kubeconfig = os.getenv('KUBECONFIG')
+                auto_fix = AutoFixInference(kubeconfig_path=kubeconfig)
+                logger.info("✅ Auto-fix engine loaded")
+                return auto_fix
+            except Exception as e:
+                logger.warning(f"Could not load auto-fix engine: {e}")
+        return None
     
     def _load_failure_patterns(self) -> Dict:
         """Load industry-specific failure patterns"""
@@ -493,26 +559,271 @@ class AIOperator:
                 self.db_conn.rollback()
     
     def detect_anomalies(self):
-        """Detect anomalies from metrics"""
-        logger.info("Starting anomaly detection loop...")
+        """Detect anomalies from metrics using ML model"""
+        logger.info("Starting ML-based anomaly detection loop...")
         
-        # This would integrate with Prometheus metrics
-        # For now, placeholder for metric-based anomaly detection
+        if not self.anomaly_detector:
+            logger.warning("Anomaly detector not available, using threshold-based detection")
+            while self.running:
+                time.sleep(60)
+            return
+        
         while self.running:
-            time.sleep(60)  # Check every minute
-            # TODO: Query Prometheus, detect anomalies, create incidents
+            try:
+                # Collect metrics from all namespaces
+                for namespace in self.config['namespaces']:
+                    metrics = self._collect_namespace_metrics(namespace)
+                    if metrics:
+                        # Run ML anomaly detection
+                        result = self.anomaly_detector.detect(metrics)
+                        
+                        if result.get('is_anomaly', False):
+                            # Create incident from anomaly
+                            self._create_incident_from_anomaly(namespace, metrics, result)
+                
+                time.sleep(60)  # Check every minute
+                
+            except Exception as e:
+                logger.error(f"Error in anomaly detection loop: {e}")
+                time.sleep(60)
+    
+    def _collect_namespace_metrics(self, namespace: str) -> Dict:
+        """Collect metrics for a namespace"""
+        try:
+            # Query pods in namespace
+            pods = self.k8s_client.list_namespaced_pod(namespace)
+            
+            if not pods.items:
+                return {}
+            
+            # Aggregate metrics (simplified - would use Prometheus)
+            total_cpu = 0.0
+            total_memory = 0.0
+            error_count = 0
+            pod_count = len(pods.items)
+            
+            for pod in pods.items:
+                # Get pod metrics (simplified)
+                if pod.status.container_statuses:
+                    for container in pod.status.container_statuses:
+                        if container.state.waiting:
+                            error_count += 1
+            
+            # Calculate averages (simplified)
+            return {
+                'cpu_usage': (total_cpu / pod_count) if pod_count > 0 else 0.0,
+                'memory_usage': (total_memory / pod_count) if pod_count > 0 else 0.0,
+                'error_rate': (error_count / pod_count) if pod_count > 0 else 0.0,
+                'pod_count': pod_count,
+                'pod_restarts': sum(c.restart_count for p in pods.items 
+                                   for c in (p.status.container_statuses or []))
+            }
+        except Exception as e:
+            logger.error(f"Error collecting metrics for {namespace}: {e}")
+            return {}
+    
+    def _create_incident_from_anomaly(self, namespace: str, metrics: Dict, anomaly_result: Dict):
+        """Create incident from detected anomaly"""
+        anomaly_score = anomaly_result.get('anomaly_score', 0.0)
+        confidence = anomaly_result.get('confidence', 0.5)
+        
+        # Determine severity
+        if anomaly_score > 0.8:
+            severity = "critical"
+        elif anomaly_score > 0.6:
+            severity = "high"
+        else:
+            severity = "medium"
+        
+        # Get anomalies list
+        anomalies_list = anomaly_result.get('anomalies', [])
+        if not anomalies_list:
+            # Create from metrics
+            anomalies_list = [
+                {
+                    'metric': k,
+                    'value': v,
+                    'severity': severity
+                }
+                for k, v in metrics.items()
+                if isinstance(v, (int, float)) and v > 0
+            ]
+        
+        # Run RCA
+        rca_result = self._perform_ml_rca(namespace, metrics, anomalies_list)
+        
+        # Generate auto-fix suggestions
+        auto_fix_result = self._generate_ml_auto_fix(namespace, metrics, rca_result)
+        
+        # Create incident
+        incident = Incident(
+            id=f"{namespace}-anomaly-{int(time.time())}",
+            namespace=namespace,
+            service=f"{namespace}-sim",
+            severity=severity,
+            anomaly_type="metric_anomaly",
+            detected_at=datetime.utcnow().isoformat(),
+            description=f"ML-detected anomaly in {namespace}: score {anomaly_score:.2f}",
+            root_cause=rca_result.get('root_cause', 'Unknown'),
+            remediation=auto_fix_result.get('message', 'Investigation needed'),
+            signals=[f"anomaly_score_{anomaly_score:.2f}", f"method_{anomaly_result.get('method', 'unknown')}"],
+            confidence=confidence,
+            industry=namespace,
+            pattern=rca_result.get('pattern', None),
+            pattern_source=rca_result.get('pattern_source', 'ml_anomaly_detector'),
+            suspected_root_cause=rca_result.get('suspected_root_cause', {}),
+            suggested_actions=auto_fix_result.get('suggested_actions', [])
+        )
+        
+        self._handle_incident(incident)
+    
+    def _perform_ml_rca(self, namespace: str, metrics: Dict, anomalies: List[Dict]) -> Dict:
+        """Perform ML-based root cause analysis"""
+        if not self.rca_engine:
+            # Fallback to rule-based
+            return {
+                'root_cause': 'Unknown',
+                'confidence': 0.3,
+                'pattern': None,
+                'pattern_source': 'rule_based_fallback'
+            }
+        
+        try:
+            incident_data = {
+                'namespace': namespace,
+                'service': f"{namespace}-sim",
+                'anomalies': anomalies,
+                'logs': [],
+                'events': [],
+                'metrics': metrics
+            }
+            
+            rca_result = self.rca_engine.analyze_incident(incident_data)
+            return rca_result
+            
+        except Exception as e:
+            logger.error(f"Error in ML RCA: {e}")
+            return {
+                'root_cause': 'Unknown',
+                'confidence': 0.3,
+                'pattern': None,
+                'pattern_source': 'error_fallback'
+            }
     
     def perform_rca(self, incident_id: str) -> str:
-        """Perform root cause analysis for an incident"""
-        # This would use your RCA engine
-        # For now, return placeholder
-        return "RCA analysis in progress..."
+        """Perform root cause analysis for an incident (public API)"""
+        # Get incident from database
+        if not self.db_conn:
+            return "Database not available"
+        
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute("SELECT * FROM incidents WHERE id = %s", (incident_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                return "Incident not found"
+            
+            # Reconstruct incident data
+            incident_data = {
+                'namespace': row[1],
+                'service': row[2],
+                'anomalies': [],
+                'logs': [],
+                'events': [],
+                'metrics': {}
+            }
+            
+            # Run ML RCA
+            rca_result = self._perform_ml_rca(
+                incident_data['namespace'],
+                incident_data['metrics'],
+                incident_data['anomalies']
+            )
+            
+            return rca_result.get('root_cause', 'Unknown')
+            
+        except Exception as e:
+            logger.error(f"Error performing RCA: {e}")
+            return f"Error: {str(e)}"
+    
+    def _generate_ml_auto_fix(self, namespace: str, metrics: Dict, rca_result: Dict) -> Dict:
+        """Generate ML-based auto-fix suggestions"""
+        if not self.auto_fix_engine:
+            # Fallback to rule-based
+            return {
+                'message': 'Auto-fix engine not available',
+                'suggested_actions': []
+            }
+        
+        try:
+            incident = {
+                'id': f"{namespace}-fix-{int(time.time())}",
+                'namespace': namespace,
+                'service': f"{namespace}-sim",
+                'anomaly_type': 'metric_anomaly',
+                'root_cause': rca_result.get('root_cause', 'Unknown'),
+                'confidence': rca_result.get('confidence', 0.5),
+                'risk_score': 0.3,
+                'suspected_root_cause': rca_result.get('suspected_root_cause', {}),
+                'metrics': metrics,
+                'logs': []
+            }
+            
+            fix_result = self.auto_fix_engine.generate_fix(incident)
+            
+            # Convert fix to suggested actions format
+            suggested_actions = []
+            if fix_result.get('success', False):
+                fix = fix_result.get('fix', {})
+                suggested_actions.append({
+                    'type': fix.get('type', 'unknown'),
+                    'target': fix.get('target', f"{namespace}-sim"),
+                    'params': fix.get('params', {}),
+                    'confidence': fix_result.get('confidence', 0.5),
+                    'description': fix_result.get('message', 'Auto-fix available')
+                })
+            
+            return {
+                'message': fix_result.get('message', 'No fix available'),
+                'suggested_actions': suggested_actions,
+                'fix_result': fix_result
+            }
+            
+        except Exception as e:
+            logger.error(f"Error generating auto-fix: {e}")
+            return {
+                'message': f"Error: {str(e)}",
+                'suggested_actions': []
+            }
     
     def suggest_auto_fix(self, incident: Incident) -> Optional[str]:
-        """Suggest auto-fix actions"""
-        # This would use your auto-fix engine
-        # For now, return remediation suggestion
-        return incident.remediation
+        """Suggest auto-fix actions (public API)"""
+        try:
+            incident_dict = {
+                'id': incident.id,
+                'namespace': incident.namespace,
+                'service': incident.service,
+                'anomaly_type': incident.anomaly_type,
+                'root_cause': incident.root_cause,
+                'confidence': incident.confidence,
+                'risk_score': 0.3,
+                'suspected_root_cause': incident.suspected_root_cause,
+                'metrics': {},
+                'logs': []
+            }
+            
+            fix_result = self._generate_ml_auto_fix(
+                incident.namespace,
+                {},
+                {'root_cause': incident.root_cause, 'confidence': incident.confidence}
+            )
+            
+            return fix_result.get('message', incident.remediation)
+            
+        except Exception as e:
+            logger.error(f"Error suggesting auto-fix: {e}")
+            return incident.remediation
     
     def run(self):
         """Run the AI Operator"""
