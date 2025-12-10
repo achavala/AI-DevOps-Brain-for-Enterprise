@@ -184,24 +184,39 @@ class AnomalyDetectionInference:
     
     def _detect_isolation_forest(self, features: np.ndarray) -> Dict:
         """Isolation Forest detection"""
-        scaled_features = self.detector.scaler.transform(features)
-        anomaly_score = self.detector.model.decision_function(scaled_features)[0]
-        prediction = self.detector.model.predict(scaled_features)[0]
-        
-        # Isolation Forest: -1 = anomaly, 1 = normal
-        is_anomaly = prediction == -1
-        
-        # Convert score to 0-1 range (higher = more anomalous)
-        # decision_function returns negative for anomalies
-        normalized_score = (1.0 - (anomaly_score + 0.5)) if is_anomaly else 0.0
-        
-        return {
-            'is_anomaly': bool(is_anomaly),
-            'anomaly_score': float(normalized_score),
-            'confidence': float(abs(anomaly_score)),
-            'method': 'isolation_forest',
-            'raw_score': float(anomaly_score)
-        }
+        try:
+            # Ensure feature count matches scaler
+            if hasattr(self.detector, 'scaler') and self.detector.scaler is not None:
+                expected_features = self.detector.scaler.n_features_in_ if hasattr(self.detector.scaler, 'n_features_in_') else features.shape[1]
+                if features.shape[1] != expected_features:
+                    if features.shape[1] > expected_features:
+                        features = features[:, :expected_features]
+                    else:
+                        padding = np.zeros((1, expected_features - features.shape[1]))
+                        features = np.hstack([features, padding])
+            
+            scaled_features = self.detector.scaler.transform(features)
+            anomaly_score = self.detector.model.decision_function(scaled_features)[0]
+            prediction = self.detector.model.predict(scaled_features)[0]
+            
+            # Isolation Forest: -1 = anomaly, 1 = normal
+            is_anomaly = prediction == -1
+            
+            # Convert score to 0-1 range (higher = more anomalous)
+            # decision_function returns negative for anomalies
+            normalized_score = (1.0 - (anomaly_score + 0.5)) if is_anomaly else 0.0
+            
+            return {
+                'is_anomaly': bool(is_anomaly),
+                'anomaly_score': float(normalized_score),
+                'confidence': float(abs(anomaly_score)),
+                'method': 'isolation_forest',
+                'raw_score': float(anomaly_score)
+            }
+        except Exception as e:
+            logger.error(f"Error in isolation forest detection: {e}")
+            # Fallback to threshold-based
+            return self._threshold_based_detection({})
     
     def _detect_prophet(self, metrics: Dict) -> Dict:
         """Prophet time-series detection"""
