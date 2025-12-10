@@ -1,0 +1,202 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ai-devops-brain-alerts
+  namespace: monitoring
+  labels:
+    app: prometheus
+    release: prometheus
+spec:
+  groups:
+  - name: cpu_alerts
+    interval: 30s
+    rules:
+    - alert: HighCPUUsage
+      expr: |
+        sum(rate(container_cpu_usage_seconds_total{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}[5m])) by (namespace, pod) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        component: cpu
+      annotations:
+        summary: "High CPU usage detected in {{ $labels.namespace }}/{{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has CPU usage above 80% for more than 5 minutes. Current value: {{ $value }}"
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#high-cpu-usage"
+    
+    - alert: CriticalCPUUsage
+      expr: |
+        sum(rate(container_cpu_usage_seconds_total{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}[5m])) by (namespace, pod) > 0.95
+      for: 2m
+      labels:
+        severity: critical
+        component: cpu
+      annotations:
+        summary: "Critical CPU usage in {{ $labels.namespace }}/{{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has CPU usage above 95% for more than 2 minutes. Immediate action required. Current value: {{ $value }}"
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#critical-cpu-usage"
+    
+    - alert: NodeCPUThrottling
+      expr: |
+        sum(rate(container_cpu_cfs_throttled_seconds_total{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}[5m])) by (namespace, pod) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+        component: cpu
+      annotations:
+        summary: "CPU throttling detected in {{ $labels.namespace }}/{{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is experiencing CPU throttling. Consider increasing CPU limits. Current throttling rate: {{ $value }}"
+
+  - name: memory_alerts
+    interval: 30s
+    rules:
+    - alert: HighMemoryUsage
+      expr: |
+        sum(container_memory_working_set_bytes{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}) by (namespace, pod) / sum(container_spec_memory_limit_bytes{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}) by (namespace, pod) > 0.85
+      for: 5m
+      labels:
+        severity: warning
+        component: memory
+      annotations:
+        summary: "High memory usage detected in {{ $labels.namespace }}/{{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is using more than 85% of its memory limit for more than 5 minutes. Current usage: {{ $value | humanizePercentage }}"
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#high-memory-usage"
+    
+    - alert: CriticalMemoryUsage
+      expr: |
+        sum(container_memory_working_set_bytes{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}) by (namespace, pod) / sum(container_spec_memory_limit_bytes{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}) by (namespace, pod) > 0.95
+      for: 2m
+      labels:
+        severity: critical
+        component: memory
+      annotations:
+        summary: "Critical memory usage in {{ $labels.namespace }}/{{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is using more than 95% of its memory limit. OOM kill imminent. Current usage: {{ $value | humanizePercentage }}"
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#critical-memory-usage"
+    
+    - alert: MemoryPressure
+      expr: |
+        (sum(container_memory_working_set_bytes{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}) by (namespace) / sum(container_spec_memory_limit_bytes{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}) by (namespace)) > 0.9
+      for: 10m
+      labels:
+        severity: warning
+        component: memory
+      annotations:
+        summary: "Memory pressure in namespace {{ $labels.namespace }}"
+        description: "Namespace {{ $labels.namespace }} is experiencing memory pressure. Overall memory usage: {{ $value | humanizePercentage }}"
+
+  - name: pod_failure_alerts
+    interval: 30s
+    rules:
+    - alert: PodCrashLooping
+      expr: |
+        rate(kube_pod_container_status_restarts_total{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+        component: pod
+      annotations:
+        summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} is crash looping"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} times in the last 15 minutes. Container: {{ $labels.container }}"
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#pod-crash-looping"
+    
+    - alert: PodNotReady
+      expr: |
+        sum by (namespace, pod) (kube_pod_status_phase{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia", phase!~"Running|Succeeded"}) > 0
+      for: 10m
+      labels:
+        severity: warning
+        component: pod
+      annotations:
+        summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} is not ready"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been in {{ $labels.phase }} state for more than 10 minutes"
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#pod-not-ready"
+    
+    - alert: PodFailed
+      expr: |
+        kube_pod_status_phase{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia", phase="Failed"} > 0
+      for: 5m
+      labels:
+        severity: critical
+        component: pod
+      annotations:
+        summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} has failed"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is in Failed state. Check pod logs for details."
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#pod-failed"
+    
+    - alert: ExcessivePodRestarts
+      expr: |
+        increase(kube_pod_container_status_restarts_total{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}[1h]) > 5
+      for: 0m
+      labels:
+        severity: warning
+        component: pod
+      annotations:
+        summary: "Excessive pod restarts in {{ $labels.namespace }}/{{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} times in the last hour. Container: {{ $labels.container }}"
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#excessive-pod-restarts"
+
+  - name: deployment_alerts
+    interval: 30s
+    rules:
+    - alert: DeploymentReplicasMismatch
+      expr: |
+        kube_deployment_spec_replicas{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"} != kube_deployment_status_replicas_available{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}
+      for: 10m
+      labels:
+        severity: warning
+        component: deployment
+      annotations:
+        summary: "Deployment {{ $labels.deployment }} in {{ $labels.namespace }} has replica mismatch"
+        description: "Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }} has {{ $value }} available replicas but expects {{ $labels.spec_replicas }}"
+        runbook_url: "https://github.com/achavala/AI-DevOps-Brain-for-Enterprise/docs/RUNBOOK.md#deployment-replicas-mismatch"
+
+  - name: node_alerts
+    interval: 30s
+    rules:
+    - alert: NodeHighCPU
+      expr: |
+        100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+      for: 5m
+      labels:
+        severity: warning
+        component: node
+      annotations:
+        summary: "Node {{ $labels.instance }} has high CPU usage"
+        description: "Node {{ $labels.instance }} CPU usage is above 80% for more than 5 minutes. Current usage: {{ $value }}%"
+    
+    - alert: NodeHighMemory
+      expr: |
+        (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+      for: 5m
+      labels:
+        severity: warning
+        component: node
+      annotations:
+        summary: "Node {{ $labels.instance }} has high memory usage"
+        description: "Node {{ $labels.instance }} memory usage is above 85%. Available: {{ $value }}%"
+
+  - name: application_alerts
+    interval: 30s
+    rules:
+    - alert: HighErrorRate
+      expr: |
+        sum(rate(http_requests_total{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia",status=~"5.."}[5m])) by (namespace, pod) / sum(rate(http_requests_total{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}[5m])) by (namespace, pod) > 0.05
+      for: 5m
+      labels:
+        severity: warning
+        component: application
+      annotations:
+        summary: "High error rate in {{ $labels.namespace }}/{{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has error rate above 5%. Current error rate: {{ $value | humanizePercentage }}"
+    
+    - alert: HighLatency
+      expr: |
+        histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{namespace=~"finance|healthcare|automotive|retail|logistics|energy|telecom|banking|insurance|manufacturing|gov|education|cloud|media|aiplatform|semiconductor|aicloud|gpucloud|socialmedia"}[5m])) by (namespace, pod, le)) > 1
+      for: 5m
+      labels:
+        severity: warning
+        component: application
+      annotations:
+        summary: "High latency in {{ $labels.namespace }}/{{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has p95 latency above 1s. Current latency: {{ $value }}s"
+

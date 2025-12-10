@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-main
+  namespace: monitoring
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      # Slack configuration (optional - uncomment and configure)
+      # slack_api_url: 'YOUR_SLACK_WEBHOOK_URL'
+    
+    # Templates for alert formatting
+    templates:
+      - '/etc/alertmanager/templates/*.tmpl'
+    
+    # Route tree
+    route:
+      receiver: 'default'
+      group_by: ['alertname', 'namespace', 'severity']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      routes:
+        # Critical alerts - immediate notification
+        - match:
+            severity: critical
+          receiver: 'critical-alerts'
+          group_wait: 0s
+          repeat_interval: 1h
+          continue: true
+        
+        # Warning alerts - grouped
+        - match:
+            severity: warning
+          receiver: 'warning-alerts'
+          group_wait: 30s
+          repeat_interval: 6h
+        
+        # CPU alerts
+        - match:
+            component: cpu
+          receiver: 'cpu-alerts'
+          group_by: ['namespace', 'severity']
+        
+        # Memory alerts
+        - match:
+            component: memory
+          receiver: 'memory-alerts'
+          group_by: ['namespace', 'severity']
+        
+        # Pod failure alerts
+        - match:
+            component: pod
+          receiver: 'pod-alerts'
+          group_by: ['namespace', 'severity']
+    
+    # Inhibition rules (suppress lower severity when higher severity fires)
+    inhibit_rules:
+      # Suppress warning CPU when critical CPU is firing
+      - source_match:
+          severity: 'critical'
+          component: 'cpu'
+        target_match:
+          severity: 'warning'
+          component: 'cpu'
+        equal: ['namespace', 'pod']
+      
+      # Suppress warning memory when critical memory is firing
+      - source_match:
+          severity: 'critical'
+          component: 'memory'
+        target_match:
+          severity: 'warning'
+          component: 'memory'
+        equal: ['namespace', 'pod']
+    
+    # Receivers
+    receivers:
+      - name: 'default'
+        webhook_configs:
+          - url: 'http://ai-operator.monitoring.svc.cluster.local:8080/alerts'
+            send_resolved: true
+    
+      - name: 'critical-alerts'
+        webhook_configs:
+          - url: 'http://ai-operator.monitoring.svc.cluster.local:8080/alerts'
+            send_resolved: true
+        # Uncomment to enable Slack for critical alerts
+        # slack_configs:
+        #   - channel: '#alerts-critical'
+        #     title: '🚨 Critical Alert: {{ .GroupLabels.alertname }}'
+        #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        #     send_resolved: true
+    
+      - name: 'warning-alerts'
+        webhook_configs:
+          - url: 'http://ai-operator.monitoring.svc.cluster.local:8080/alerts'
+            send_resolved: true
+        # Uncomment to enable Slack for warnings
+        # slack_configs:
+        #   - channel: '#alerts-warning'
+        #     title: '⚠️ Warning: {{ .GroupLabels.alertname }}'
+        #     text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    
+      - name: 'cpu-alerts'
+        webhook_configs:
+          - url: 'http://ai-operator.monitoring.svc.cluster.local:8080/alerts'
+            send_resolved: true
+    
+      - name: 'memory-alerts'
+        webhook_configs:
+          - url: 'http://ai-operator.monitoring.svc.cluster.local:8080/alerts'
+            send_resolved: true
+    
+      - name: 'pod-alerts'
+        webhook_configs:
+          - url: 'http://ai-operator.monitoring.svc.cluster.local:8080/alerts'
+            send_resolved: true
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-templates
+  namespace: monitoring
+data:
+  default.tmpl: |
+    {{ define "__subject" }}
+    [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.alertname }}
+    {{ end }}
+    
+    {{ define "__description" }}
+    {{ range .Alerts.Firing }}
+    Alert: {{ .Labels.alertname }}
+    Severity: {{ .Labels.severity }}
+    Namespace: {{ .Labels.namespace }}
+    Pod: {{ .Labels.pod }}
+    Description: {{ .Annotations.description }}
+    {{ if .Annotations.runbook_url }}Runbook: {{ .Annotations.runbook_url }}{{ end }}
+    {{ end }}
+    {{ end }}
+

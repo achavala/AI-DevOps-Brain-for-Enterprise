@@ -149,6 +149,11 @@ echo "📊 Importing Grafana dashboards..."
 ./scripts/import-grafana-dashboards.sh
 echo ""
 
+# Configure alerts
+echo "🚨 Configuring Prometheus alerts..."
+./scripts/configure-alerts.sh
+echo ""
+
 # Get service URLs
 echo "🌐 Service URLs:"
 echo ""
