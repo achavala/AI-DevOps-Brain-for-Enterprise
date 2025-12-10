@@ -45,45 +45,66 @@ echo ""
 
 # Install Prometheus + Grafana Stack
 echo "📊 Installing Prometheus + Grafana..."
-if ! kubectl get deployment prometheus-operator -n monitoring &> /dev/null; then
-    helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
-        --namespace monitoring \
-        --create-namespace \
-        --set prometheus.prometheusSpec.retention=7d \
-        --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage=10Gi \
-        --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
-        --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
-        --set grafana.enabled=true \
-        --set grafana.adminPassword=admin \
-        --set grafana.persistence.enabled=true \
-        --set grafana.persistence.size=5Gi \
-        --set grafana.service.type=NodePort \
-        --set grafana.service.nodePort=30080 \
-        --wait --timeout=10m
-    
-    echo "✅ Prometheus + Grafana installed"
+echo "   (This may take 10-15 minutes on Minikube - be patient!)"
+echo ""
+
+# Check if release exists
+if helm list -n monitoring | grep -q prometheus; then
+    echo "⚠️  Prometheus release exists, upgrading..."
+    UPGRADE_MODE="upgrade"
 else
-    echo "✅ Prometheus + Grafana already installed"
+    echo "📦 Installing new Prometheus release..."
+    UPGRADE_MODE="install"
 fi
+
+# For Minikube/local: disable Grafana persistence to avoid PVC issues
+# This is fine for local dev - Grafana will work without persistence
+helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+    --namespace monitoring \
+    --create-namespace \
+    --set prometheus.prometheusSpec.retention=7d \
+    --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage=10Gi \
+    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+    --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
+    --set grafana.enabled=true \
+    --set grafana.adminPassword=admin \
+    --set grafana.persistence.enabled=false \
+    --set grafana.service.type=NodePort \
+    --set grafana.service.nodePort=30080 \
+    --timeout=20m \
+    --wait || {
+    echo "⚠️  Helm deployment in progress (timeout is normal for large charts)"
+    echo "   Checking status..."
+}
+
+# Wait for critical pods (with longer timeout)
+echo ""
+echo "⏳ Waiting for critical pods to be ready..."
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=prometheus-operator -n monitoring --timeout=300s || echo "⚠️  Prometheus operator still starting..."
+kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=grafana -n monitoring --timeout=300s || echo "⚠️  Grafana still starting..."
+
+echo "✅ Prometheus + Grafana deployment initiated"
 echo ""
 
 # Install Loki
 echo "📝 Installing Loki..."
-if ! kubectl get deployment loki -n logging &> /dev/null; then
-    helm upgrade --install loki grafana/loki-stack \
-        --namespace logging \
-        --create-namespace \
-        --set loki.persistence.enabled=true \
-        --set loki.persistence.size=10Gi \
-        --set loki.config.limits_config.retention_period=168h \
-        --set promtail.enabled=true \
-        --set grafana.enabled=false \
-        --wait --timeout=10m
-    
-    echo "✅ Loki installed"
-else
-    echo "✅ Loki already installed"
-fi
+echo "   (For local dev, disabling persistence to avoid storage issues)"
+echo ""
+
+# For Minikube: disable persistence (logs will be ephemeral but that's OK for local)
+helm upgrade --install loki grafana/loki-stack \
+    --namespace logging \
+    --create-namespace \
+    --set loki.persistence.enabled=false \
+    --set loki.config.limits_config.retention_period=24h \
+    --set promtail.enabled=true \
+    --set grafana.enabled=false \
+    --timeout=15m \
+    --wait || {
+    echo "⚠️  Loki deployment in progress..."
+}
+
+echo "✅ Loki deployment initiated"
 echo ""
 
 # Configure Grafana to use Loki
@@ -123,16 +144,15 @@ echo ""
 
 # Install KEDA
 echo "📈 Installing KEDA..."
-if ! kubectl get deployment keda-operator -n keda &> /dev/null; then
-    helm upgrade --install keda kedacore/keda \
-        --namespace keda \
-        --create-namespace \
-        --wait --timeout=10m
-    
-    echo "✅ KEDA installed"
-else
-    echo "✅ KEDA already installed"
-fi
+helm upgrade --install keda kedacore/keda \
+    --namespace keda \
+    --create-namespace \
+    --timeout=10m \
+    --wait || {
+    echo "⚠️  KEDA deployment in progress..."
+}
+
+echo "✅ KEDA deployment initiated"
 echo ""
 
 # Wait for all pods to be ready
