@@ -11,43 +11,62 @@ import time
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 import psycopg2
 from kafka import KafkaProducer, KafkaConsumer
 import redis
 
-# Add AI models to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ai-models'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ai-models', 'anomaly-detection'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ai-models', 'rca-engine'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'ai-models', 'auto-fix'))
-
-try:
-    from inference import AnomalyDetectionInference
-except ImportError:
-    AnomalyDetectionInference = None
-    logger.warning("Anomaly detection inference not available")
-
-try:
-    from inference import RCAInference
-except ImportError:
-    RCAInference = None
-    logger.warning("RCA inference not available")
-
-try:
-    from inference import AutoFixInference
-except ImportError:
-    AutoFixInference = None
-    logger.warning("Auto-fix inference not available")
-
-# Configure logging
+# Configure logging FIRST (before any imports that might use it)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Add AI models to path
+base_path = os.path.join(os.path.dirname(__file__), '..')
+sys.path.insert(0, os.path.join(base_path, 'ai-models'))
+
+# Import AI model inference modules using importlib (handles hyphenated directory names)
+import importlib.util
+
+# Anomaly Detection
+try:
+    anomaly_path = os.path.join(base_path, 'ai-models', 'anomaly-detection', 'inference.py')
+    spec = importlib.util.spec_from_file_location('anomaly_inference', anomaly_path)
+    anomaly_inference = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(anomaly_inference)
+    AnomalyDetectionInference = anomaly_inference.AnomalyDetectionInference
+    logger.info("Anomaly detection inference loaded")
+except (ImportError, FileNotFoundError, AttributeError) as e:
+    AnomalyDetectionInference = None
+    logger.warning(f"Anomaly detection inference not available: {e}")
+
+# RCA Engine
+try:
+    rca_path = os.path.join(base_path, 'ai-models', 'rca-engine', 'inference.py')
+    spec = importlib.util.spec_from_file_location('rca_inference', rca_path)
+    rca_inference = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rca_inference)
+    RCAInference = rca_inference.RCAInference
+    logger.info("RCA inference loaded")
+except (ImportError, FileNotFoundError, AttributeError) as e:
+    RCAInference = None
+    logger.warning(f"RCA inference not available: {e}")
+
+# Auto-Fix Engine
+try:
+    autofix_path = os.path.join(base_path, 'ai-models', 'auto-fix', 'inference.py')
+    spec = importlib.util.spec_from_file_location('autofix_inference', autofix_path)
+    autofix_inference = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(autofix_inference)
+    AutoFixInference = autofix_inference.AutoFixInference
+    logger.info("Auto-fix inference loaded")
+except (ImportError, FileNotFoundError, AttributeError) as e:
+    AutoFixInference = None
+    logger.warning(f"Auto-fix inference not available: {e}")
 
 @dataclass
 class Incident:
