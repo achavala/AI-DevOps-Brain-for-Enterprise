@@ -9,7 +9,7 @@ import sys
 import json
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict, field
 from kubernetes import client, config, watch
@@ -289,7 +289,7 @@ class AIOperator:
                 service=pod_name,
                 severity="high",
                 anomaly_type="pod_failure",
-                detected_at=datetime.utcnow().isoformat(),
+                detected_at=datetime.now(datetime.timezone.utc).isoformat(),
                 description=f"Pod {pod_name} in {namespace} is {status}",
                 root_cause=root_cause_analysis.get('summary', 'Unknown'),
                 remediation=self._suggest_remediation_structured(namespace, "pod_failure"),
@@ -316,7 +316,7 @@ class AIOperator:
                         service=pod_name,
                         severity="medium",
                         anomaly_type="excessive_restarts",
-                        detected_at=datetime.utcnow().isoformat(),
+                        detected_at=datetime.now(datetime.timezone.utc).isoformat(),
                         description=f"Pod {pod_name} has restarted {container.restart_count} times",
                         root_cause=root_cause_analysis.get('summary', 'Unknown'),
                         remediation=self._suggest_remediation_structured(namespace, "restarts"),
@@ -608,9 +608,13 @@ class AIOperator:
     
     def _collect_namespace_metrics(self, namespace: str) -> Dict:
         """Collect metrics for a namespace"""
-        try:
-            # Query pods in namespace
-            pods = self.k8s_client.list_namespaced_pod(namespace)
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                # Query pods in namespace
+                pods = self.k8s_client.list_namespaced_pod(namespace)
             
             if not pods.items:
                 return {}
@@ -628,18 +632,23 @@ class AIOperator:
                         if container.state.waiting:
                             error_count += 1
             
-            # Calculate averages (simplified)
-            return {
-                'cpu_usage': (total_cpu / pod_count) if pod_count > 0 else 0.0,
-                'memory_usage': (total_memory / pod_count) if pod_count > 0 else 0.0,
-                'error_rate': (error_count / pod_count) if pod_count > 0 else 0.0,
-                'pod_count': pod_count,
-                'pod_restarts': sum(c.restart_count for p in pods.items 
-                                   for c in (p.status.container_statuses or []))
-            }
-        except Exception as e:
-            logger.error(f"Error collecting metrics for {namespace}: {e}")
-            return {}
+                # Calculate averages (simplified)
+                return {
+                    'cpu_usage': (total_cpu / pod_count) if pod_count > 0 else 0.0,
+                    'memory_usage': (total_memory / pod_count) if pod_count > 0 else 0.0,
+                    'error_rate': (error_count / pod_count) if pod_count > 0 else 0.0,
+                    'pod_count': pod_count,
+                    'pod_restarts': sum(c.restart_count for p in pods.items 
+                                       for c in (p.status.container_statuses or []))
+                }
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Error collecting metrics for {namespace} (attempt {attempt + 1}/{max_retries}): {e}. Retrying...")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    logger.error(f"Error collecting metrics for {namespace} after {max_retries} attempts: {e}")
+                    return {}
     
     def _create_incident_from_anomaly(self, namespace: str, metrics: Dict, anomaly_result: Dict):
         """Create incident from detected anomaly"""
@@ -681,7 +690,7 @@ class AIOperator:
             service=f"{namespace}-sim",
             severity=severity,
             anomaly_type="metric_anomaly",
-            detected_at=datetime.utcnow().isoformat(),
+            detected_at=datetime.now(datetime.timezone.utc).isoformat(),
             description=f"ML-detected anomaly in {namespace}: score {anomaly_score:.2f}",
             root_cause=rca_result.get('root_cause', 'Unknown'),
             remediation=auto_fix_result.get('message', 'Investigation needed'),

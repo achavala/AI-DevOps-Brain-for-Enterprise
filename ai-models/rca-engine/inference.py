@@ -119,20 +119,23 @@ class RCAInference:
     def _metrics_to_dataframe(self, metrics: Dict) -> pd.DataFrame:
         """Convert metrics to DataFrame"""
         if not metrics:
-            return pd.DataFrame()
+            return pd.DataFrame(columns=['timestamp'])
         
-        # Create time series from metrics
-        data = []
-        timestamp = datetime.utcnow()
+        # Create time series from metrics - format expected by RCA engine
+        # RCA engine expects columns to be metric names, not 'metric' and 'value'
+        from datetime import timezone
+        timestamp = datetime.now(timezone.utc)
         
+        # Create a single row with all metrics as columns
+        data = {'timestamp': timestamp}
         for metric_name, value in metrics.items():
-            data.append({
-                'timestamp': timestamp,
-                'metric': metric_name,
-                'value': value
-            })
+            # Ensure numeric values
+            try:
+                data[metric_name] = float(value) if value is not None else 0.0
+            except (ValueError, TypeError):
+                data[metric_name] = 0.0
         
-        return pd.DataFrame(data)
+        return pd.DataFrame([data])
     
     def _events_to_dataframe(self, events: List[Dict]) -> pd.DataFrame:
         """Convert events to DataFrame"""

@@ -97,25 +97,45 @@ class RCAEngine:
         """Detect anomalies in metrics"""
         anomalies = []
         
+        if metrics.empty:
+            return anomalies
+        
         for metric_name in metrics.columns:
             if metric_name == 'timestamp':
                 continue
+            
+            try:
+                values = pd.to_numeric(metrics[metric_name], errors='coerce').values
+                # Filter out NaN values
+                values = values[~np.isnan(values)]
                 
-            values = metrics[metric_name].values
-            mean = np.mean(values)
-            std = np.std(values)
-            threshold = mean + 3 * std
+                if len(values) == 0:
+                    continue
+                
+                mean = np.mean(values)
+                std = np.std(values)
+                
+                # Avoid division by zero
+                if std == 0:
+                    continue
+                
+                threshold = mean + 3 * std
             
-            anomaly_indices = np.where(values > threshold)[0]
-            
-            for idx in anomaly_indices:
-                anomalies.append({
-                    'timestamp': metrics.iloc[idx]['timestamp'],
-                    'metric': metric_name,
-                    'value': values[idx],
-                    'threshold': threshold,
-                    'severity': 'high' if values[idx] > mean + 5 * std else 'medium'
-                })
+                anomaly_indices = np.where(values > threshold)[0]
+                
+                for idx in anomaly_indices:
+                    # Get timestamp safely
+                    timestamp = metrics.iloc[idx]['timestamp'] if 'timestamp' in metrics.columns else datetime.now()
+                    anomalies.append({
+                        'timestamp': timestamp,
+                        'metric': metric_name,
+                        'value': float(values[idx]),
+                        'threshold': float(threshold),
+                        'severity': 'high' if values[idx] > mean + 5 * std else 'medium'
+                    })
+            except Exception as e:
+                logger.warning(f"Error processing metric {metric_name}: {e}")
+                continue
         
         return anomalies
     

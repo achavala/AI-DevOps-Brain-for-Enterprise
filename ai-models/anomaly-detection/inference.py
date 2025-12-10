@@ -130,7 +130,9 @@ class AnomalyDetectionInference:
     
     def _metrics_to_features(self, metrics: Dict) -> np.ndarray:
         """Convert metrics dict to feature vector"""
-        # Standard features
+        # Standard features - match training data format
+        # Training uses: cpu_usage, memory_usage, request_latency_ms, error_rate_percent
+        # But we'll map common metric names to these
         feature_order = [
             'cpu_usage', 'memory_usage', 'error_rate', 
             'latency_p95', 'latency_p99', 'request_rate',
@@ -139,9 +141,32 @@ class AnomalyDetectionInference:
         
         features = []
         for feat in feature_order:
-            features.append(metrics.get(feat, 0.0))
+            # Map common metric names
+            if feat == 'error_rate':
+                value = metrics.get('error_rate', metrics.get('error_rate_percent', 0.0))
+            elif feat == 'latency_p95':
+                value = metrics.get('latency_p95', metrics.get('request_latency_ms', 0.0))
+            elif feat == 'latency_p99':
+                value = metrics.get('latency_p99', metrics.get('request_latency_ms', 0.0))
+            else:
+                value = metrics.get(feat, 0.0)
+            features.append(float(value))
         
-        return np.array(features).reshape(1, -1)
+        feature_array = np.array(features).reshape(1, -1)
+        
+        # If scaler expects fewer features, use only the first N
+        if hasattr(self.detector, 'scaler') and self.detector.scaler is not None:
+            expected_features = self.detector.scaler.n_features_in_ if hasattr(self.detector.scaler, 'n_features_in_') else None
+            if expected_features and feature_array.shape[1] != expected_features:
+                # Use only the first N features that match training
+                if expected_features <= feature_array.shape[1]:
+                    feature_array = feature_array[:, :expected_features]
+                else:
+                    # Pad with zeros if we have fewer features
+                    padding = np.zeros((1, expected_features - feature_array.shape[1]))
+                    feature_array = np.hstack([feature_array, padding])
+        
+        return feature_array
     
     def _detect_zscore(self, features: np.ndarray) -> Dict:
         """Z-score based detection"""
