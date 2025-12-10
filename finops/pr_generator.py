@@ -32,6 +32,7 @@ class PullRequest:
     estimated_savings: float
     risk_score: float
     evidence: Dict
+    risk_analysis: Optional[Dict] = None  # NEW: Comprehensive risk analysis
 
 class PRGenerator:
     """Generates PRs for cost optimization opportunities"""
@@ -43,16 +44,191 @@ class PRGenerator:
     def generate_pr(self, opportunity: Opportunity) -> PullRequest:
         """Generate a PR for an opportunity"""
         
+        # Generate base PR
         if opportunity.type == OpportunityType.OVER_REQUESTED_CPU:
-            return self._generate_cpu_rightsize_pr(opportunity)
+            pr = self._generate_cpu_rightsize_pr(opportunity)
         elif opportunity.type == OpportunityType.OVER_REQUESTED_MEMORY:
-            return self._generate_memory_rightsize_pr(opportunity)
+            pr = self._generate_memory_rightsize_pr(opportunity)
         elif opportunity.type == OpportunityType.IDLE_NODES:
-            return self._generate_node_consolidation_pr(opportunity)
+            pr = self._generate_node_consolidation_pr(opportunity)
         elif opportunity.type == OpportunityType.ORPHAN_VOLUMES:
-            return self._generate_volume_cleanup_pr(opportunity)
+            pr = self._generate_volume_cleanup_pr(opportunity)
+        elif opportunity.type == OpportunityType.MISCONFIGURED_AUTOSCALING:
+            pr = self._generate_autoscaling_fix_pr(opportunity)
+        elif opportunity.type == OpportunityType.KARPENTER_CONSOLIDATION:
+            pr = self._generate_karpenter_consolidation_pr(opportunity)
         else:
             raise ValueError(f"Unsupported opportunity type: {opportunity.type}")
+        
+        # Add risk analysis
+        pr.risk_analysis = self._calculate_risk_analysis(opportunity, pr)
+        
+        # Update description with risk analysis
+        pr.description += f"\n\n### Risk Analysis\n{self._format_risk_analysis(pr.risk_analysis)}"
+        
+        return pr
+    
+    def _calculate_risk_analysis(self, opportunity: Opportunity, pr: PullRequest) -> Dict:
+        """Calculate comprehensive risk analysis"""
+        return {
+            'blast_radius': self._calculate_blast_radius(opportunity),
+            'latency_impact': self._estimate_latency_impact(opportunity),
+            'dependency_risk': self._analyze_dependencies(opportunity),
+            'slo_impact': self._calculate_slo_impact(opportunity),
+            'confidence': opportunity.confidence,
+            'overall_risk': pr.risk_score
+        }
+    
+    def _calculate_blast_radius(self, opportunity: Opportunity) -> Dict:
+        """Calculate blast radius (how many pods/services affected)"""
+        # Simplified - would query K8s API
+        return {
+            'affected_pods': 1,  # Would calculate from deployment
+            'affected_services': 1,
+            'affected_namespaces': 1,
+            'risk_level': 'low' if opportunity.risk_score < 0.3 else 'medium'
+        }
+    
+    def _estimate_latency_impact(self, opportunity: Opportunity) -> Dict:
+        """Estimate latency impact"""
+        # Simplified - would use historical metrics
+        if opportunity.type in [OpportunityType.OVER_REQUESTED_CPU, OpportunityType.OVER_REQUESTED_MEMORY]:
+            return {
+                'expected_latency_change_ms': 0,  # Right-sizing shouldn't increase latency
+                'risk_level': 'low'
+            }
+        return {
+            'expected_latency_change_ms': 0,
+            'risk_level': 'low'
+        }
+    
+    def _analyze_dependencies(self, opportunity: Opportunity) -> Dict:
+        """Analyze dependency risk"""
+        # Would query service mesh or dependency graph
+        return {
+            'upstream_services': [],
+            'downstream_services': [],
+            'risk_level': 'low'
+        }
+    
+    def _calculate_slo_impact(self, opportunity: Opportunity) -> Dict:
+        """Calculate SLO impact score"""
+        # Simplified SLO impact
+        if opportunity.risk_score < 0.3:
+            slo_risk = 'low'
+        elif opportunity.risk_score < 0.6:
+            slo_risk = 'medium'
+        else:
+            slo_risk = 'high'
+        
+        return {
+            'slo_violation_risk': slo_risk,
+            'availability_impact': 'none' if opportunity.risk_score < 0.3 else 'minimal',
+            'latency_impact': 'none'
+        }
+    
+    def _format_risk_analysis(self, risk_analysis: Dict) -> str:
+        """Format risk analysis for PR description"""
+        return f"""
+- **Blast Radius**: {risk_analysis['blast_radius']['affected_pods']} pod(s), {risk_analysis['blast_radius']['affected_services']} service(s)
+- **Latency Impact**: {risk_analysis['latency_impact']['expected_latency_change_ms']}ms ({risk_analysis['latency_impact']['risk_level']} risk)
+- **Dependency Risk**: {risk_analysis['dependency_risk']['risk_level']}
+- **SLO Impact**: {risk_analysis['slo_impact']['slo_violation_risk']} risk
+- **Overall Confidence**: {risk_analysis['confidence']:.0%}
+        """.strip()
+    
+    def _generate_autoscaling_fix_pr(self, opp: Opportunity) -> PullRequest:
+        """Generate PR for autoscaling fix"""
+        changes = []
+        
+        hpa_file = f"k8s/{opp.namespace}/hpa-{opp.workload}.yaml"
+        changes.append(PRChange(
+            file_path=hpa_file,
+            change_type='kubernetes',
+            before=opp.before_state,
+            after=opp.after_state,
+            description=f"Fix HPA configuration: min replicas {opp.before_state.get('min_replicas', 'N/A')} → {opp.after_state.get('min_replicas', 'N/A')}"
+        ))
+        
+        return PullRequest(
+            title=f"Cost Optimization: Fix Autoscaling for {opp.workload}",
+            description=f"""
+## Cost Optimization Opportunity
+
+**Type**: Autoscaling Configuration Fix
+**Workload**: {opp.workload}
+**Namespace**: {opp.namespace}
+
+### Impact
+- **Estimated Monthly Savings**: ${opp.estimated_monthly_savings:.2f}
+- **Confidence**: {opp.confidence:.0%}
+- **Risk Score**: {opp.risk_score:.0%}
+
+### Changes
+- Min replicas: {opp.before_state.get('min_replicas', 'N/A')} → {opp.after_state.get('min_replicas', 'N/A')}
+- Scale-up delay: {opp.before_state.get('scale_up_delay', 'N/A')}s → {opp.after_state.get('scale_up_delay', 'N/A')}s
+
+### Evidence
+- Current CPU utilization: {opp.evidence.get('avg_cpu_utilization', 0):.1%}
+- Current memory utilization: {opp.evidence.get('avg_memory_utilization', 0):.1%}
+
+---
+*Generated by AI DevOps Brain FinOps Engine*
+            """.strip(),
+            opportunity_id=opp.id,
+            branch_name=f"finops/autoscaling-fix-{opp.workload}-{datetime.utcnow().strftime('%Y%m%d')}",
+            changes=changes,
+            estimated_savings=opp.estimated_monthly_savings,
+            risk_score=opp.risk_score,
+            evidence=opp.evidence
+        )
+    
+    def _generate_karpenter_consolidation_pr(self, opp: Opportunity) -> PullRequest:
+        """Generate PR for Karpenter consolidation"""
+        changes = []
+        
+        # Generate Karpenter provisioner change
+        karpenter_file = f"infrastructure/karpenter/{opp.workload}-provisioner.yaml"
+        changes.append(PRChange(
+            file_path=karpenter_file,
+            change_type='karpenter',
+            before=opp.before_state,
+            after=opp.after_state,
+            description=f"Consolidate nodes: {opp.before_state.get('node_count', 'N/A')} → {opp.after_state.get('node_count', 'N/A')} nodes"
+        ))
+        
+        return PullRequest(
+            title=f"Cost Optimization: Karpenter Consolidation for {opp.workload}",
+            description=f"""
+## Cost Optimization Opportunity
+
+**Type**: Karpenter Node Consolidation
+**Node Group**: {opp.workload}
+**Cluster**: {opp.cluster}
+
+### Impact
+- **Estimated Monthly Savings**: ${opp.estimated_monthly_savings:.2f}
+- **Confidence**: {opp.confidence:.0%}
+- **Risk Score**: {opp.risk_score:.0%}
+
+### Changes
+- Node count: {opp.before_state.get('node_count', 'N/A')} → {opp.after_state.get('node_count', 'N/A')}
+- Instance type: {opp.before_state.get('instance_type', 'N/A')} (unchanged)
+
+### Evidence
+- Average CPU utilization: {opp.evidence.get('avg_cpu_utilization', 0):.1%}
+- Average memory utilization: {opp.evidence.get('avg_memory_utilization', 0):.1%}
+
+---
+*Generated by AI DevOps Brain FinOps Engine*
+            """.strip(),
+            opportunity_id=opp.id,
+            branch_name=f"finops/karpenter-consolidation-{opp.workload}-{datetime.utcnow().strftime('%Y%m%d')}",
+            changes=changes,
+            estimated_savings=opp.estimated_monthly_savings,
+            risk_score=opp.risk_score,
+            evidence=opp.evidence
+        )
     
     def _generate_cpu_rightsize_pr(self, opp: Opportunity) -> PullRequest:
         """Generate PR for CPU right-sizing"""

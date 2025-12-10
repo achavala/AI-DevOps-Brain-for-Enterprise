@@ -299,6 +299,181 @@ class OrphanVolumeDetector(WasteDetector):
         
         return results
 
+class MisconfiguredAutoscalingDetector(WasteDetector):
+    """Detects misconfigured HPA/KEDA autoscaling"""
+    
+    def __init__(self, min_utilization_threshold: float = 0.3, max_utilization_threshold: float = 0.8):
+        self.min_utilization_threshold = min_utilization_threshold
+        self.max_utilization_threshold = max_utilization_threshold
+    
+    def get_type(self) -> OpportunityType:
+        return OpportunityType.MISCONFIGURED_AUTOSCALING
+    
+    def detect(self, cluster_data: Dict) -> List[DetectorResult]:
+        """Detect misconfigured autoscaling"""
+        results = []
+        
+        hpa_configs = cluster_data.get('hpa_configs', [])
+        keda_configs = cluster_data.get('keda_configs', [])
+        
+        # Check HPA configurations
+        for hpa in hpa_configs:
+            namespace = hpa.get('namespace', 'default')
+            workload = hpa.get('workload', 'unknown')
+            min_replicas = hpa.get('min_replicas', 1)
+            max_replicas = hpa.get('max_replicas', 10)
+            current_replicas = hpa.get('current_replicas', min_replicas)
+            avg_cpu_util = hpa.get('avg_cpu_utilization', 0)
+            avg_mem_util = hpa.get('avg_memory_utilization', 0)
+            
+            # Check if min replicas too high
+            if min_replicas > 1 and avg_cpu_util < self.min_utilization_threshold:
+                # Can reduce min replicas
+                suggested_min = max(1, int(min_replicas * avg_cpu_util * 1.2))
+                if suggested_min < min_replicas:
+                    # Estimate savings (simplified)
+                    savings = (min_replicas - suggested_min) * 50.0  # $50/month per pod
+                    
+                    results.append(DetectorResult(
+                        opportunity_id=str(uuid.uuid4()),
+                        type=self.get_type(),
+                        detected_at=datetime.utcnow(),
+                        cluster=cluster_data.get('cluster', 'unknown'),
+                        namespace=namespace,
+                        workload=workload,
+                        team=hpa.get('team', 'unknown'),
+                        estimated_monthly_savings=savings,
+                        confidence=0.75,
+                        risk_score=0.3,
+                        evidence={
+                            'current_min_replicas': min_replicas,
+                            'suggested_min_replicas': suggested_min,
+                            'avg_cpu_utilization': avg_cpu_util,
+                            'avg_memory_utilization': avg_mem_util
+                        },
+                        before_state={
+                            'min_replicas': min_replicas,
+                            'max_replicas': max_replicas
+                        },
+                        after_state={
+                            'min_replicas': suggested_min,
+                            'max_replicas': max_replicas
+                        },
+                        recommendation=f"Reduce HPA min replicas from {min_replicas} to {suggested_min} for {workload}. Current CPU utilization: {avg_cpu_util:.1%}"
+                    ))
+            
+            # Check if scaling is too slow
+            if hpa.get('scale_up_delay', 0) > 300:  # More than 5 minutes
+                savings = 20.0  # Estimated savings from faster scaling
+                results.append(DetectorResult(
+                    opportunity_id=str(uuid.uuid4()),
+                    type=self.get_type(),
+                    detected_at=datetime.utcnow(),
+                    cluster=cluster_data.get('cluster', 'unknown'),
+                    namespace=namespace,
+                    workload=workload,
+                    team=hpa.get('team', 'unknown'),
+                    estimated_monthly_savings=savings,
+                    confidence=0.65,
+                    risk_score=0.2,
+                    evidence={
+                        'scale_up_delay': hpa.get('scale_up_delay', 0),
+                        'recommended_delay': 60  # 1 minute
+                    },
+                    before_state={'scale_up_delay': hpa.get('scale_up_delay', 0)},
+                    after_state={'scale_up_delay': 60},
+                    recommendation=f"Reduce HPA scale-up delay from {hpa.get('scale_up_delay', 0)}s to 60s for faster scaling"
+                ))
+        
+        # Check KEDA configurations (similar logic)
+        for keda in keda_configs:
+            # Similar detection logic for KEDA
+            pass
+        
+        return results
+
+class KarpenterConsolidationDetector(WasteDetector):
+    """Detects Karpenter node consolidation opportunities"""
+    
+    def __init__(self, utilization_threshold: float = 0.5):
+        self.utilization_threshold = utilization_threshold
+    
+    def get_type(self) -> OpportunityType:
+        return OpportunityType.KARPENTER_CONSOLIDATION
+    
+    def detect(self, cluster_data: Dict) -> List[DetectorResult]:
+        """Detect Karpenter consolidation opportunities"""
+        results = []
+        
+        nodes = cluster_data.get('nodes', [])
+        node_groups = {}
+        
+        # Group nodes by instance type
+        for node in nodes:
+            instance_type = node.get('instance_type', 'unknown')
+            if instance_type not in node_groups:
+                node_groups[instance_type] = []
+            node_groups[instance_type].append(node)
+        
+        # Find underpacked nodes
+        for instance_type, node_list in node_groups.items():
+            if len(node_list) < 2:
+                continue  # Need at least 2 nodes to consolidate
+            
+            total_cpu_util = sum(n.get('cpu_utilization', 0) for n in node_list) / len(node_list)
+            total_mem_util = sum(n.get('memory_utilization', 0) for n in node_list) / len(node_list)
+            avg_util = (total_cpu_util + total_mem_util) / 2
+            
+            if avg_util < self.utilization_threshold:
+                # Can consolidate
+                node_cost = self._estimate_node_cost(instance_type)
+                suggested_nodes = max(1, int(len(node_list) * avg_util * 1.3))  # 30% headroom
+                
+                if suggested_nodes < len(node_list):
+                    savings = (len(node_list) - suggested_nodes) * node_cost
+                    
+                    results.append(DetectorResult(
+                        opportunity_id=str(uuid.uuid4()),
+                        type=self.get_type(),
+                        detected_at=datetime.utcnow(),
+                        cluster=cluster_data.get('cluster', 'unknown'),
+                        namespace='cluster',
+                        workload=f"{instance_type}-nodes",
+                        team='infrastructure',
+                        estimated_monthly_savings=savings,
+                        confidence=0.7,
+                        risk_score=0.4,  # Medium risk - node changes
+                        evidence={
+                            'current_node_count': len(node_list),
+                            'suggested_node_count': suggested_nodes,
+                            'avg_cpu_utilization': total_cpu_util,
+                            'avg_memory_utilization': total_mem_util,
+                            'instance_type': instance_type
+                        },
+                        before_state={
+                            'node_count': len(node_list),
+                            'instance_type': instance_type
+                        },
+                        after_state={
+                            'node_count': suggested_nodes,
+                            'instance_type': instance_type
+                        },
+                        recommendation=f"Consolidate {instance_type} nodes from {len(node_list)} to {suggested_nodes}. Current utilization: {avg_util:.1%}"
+                    ))
+        
+        return results
+    
+    def _estimate_node_cost(self, instance_type: str) -> float:
+        """Estimate monthly cost for instance type"""
+        pricing = {
+            't3.medium': 30.0,
+            't3.large': 60.0,
+            'm5.large': 70.0,
+            'm5.xlarge': 140.0,
+            'c5.xlarge': 150.0,
+        }
+        return pricing.get(instance_type, 100.0)
+
 class WasteDetectionEngine:
     """Main waste detection engine"""
     
@@ -308,6 +483,8 @@ class WasteDetectionEngine:
             OverRequestedMemoryDetector(),
             IdleNodeDetector(),
             OrphanVolumeDetector(),
+            MisconfiguredAutoscalingDetector(),  # NEW
+            KarpenterConsolidationDetector(),  # NEW
         ]
     
     def detect_all(self, cluster_data: Dict) -> List[DetectorResult]:
